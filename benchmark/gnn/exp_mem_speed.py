@@ -131,7 +131,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     networks = ['gcn']
-    algs = ['L0', "L1", "L2", "L2.2"]
+    algs = ['L0', "L1", "L2"]
+#     algs = ['L2']
     
     if args.mode == 'linear_scan':
         pass                  
@@ -162,12 +163,14 @@ if __name__ == "__main__":
     elif args.mode == 'binary_search_max_layer':
         for network in networks:
             for alg in algs:
-                low, high = 20, 400
+                low, high = 10, 1000
                 max_layer = binary_search_max_layer(network, alg, low, high)
                 batch_time = get_batch_time(network, alg, num_layer=max_layer)
                 macs, params = get_macs(network, alg, num_layer=max_layer)
 
-                out_file = "max_layer_results.json"
+#                 out_file = "max_layer_results.json"
+                out_file = "max_layer_results_L2.json"
+
                 with open(out_file, "a") as fout:
                     val_dict = {
                         "network": network,

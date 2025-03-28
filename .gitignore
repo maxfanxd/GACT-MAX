@@ -27,3 +27,6 @@ gact/build
 gact/dist
 gact/gact.egg-info
 gact/gact/cpp_extension/*.so
+
+# Benchmark
+benchmark

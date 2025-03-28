@@ -1,3 +1,14 @@
+# MaxFan's bugs
+connection error解决方案：
+```
+pip install urllib3==1.25.11
+export all_proxy=socks5://192.168.1.110:1080/
+export https_proxy=http://192.168.1.110:1081/
+```
+
+我在run_glue.py 294行改了一下分词器
+
+
 # GACT NLP Experiments
 ## Requirements
 Make sure you have GACT installed. 

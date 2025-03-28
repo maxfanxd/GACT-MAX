@@ -20,6 +20,7 @@ import os
 import random
 import torch
 from pathlib import Path
+from transformers import BertTokenizer, BertModel
 
 import datasets
 from datasets import load_dataset, load_metric
@@ -47,6 +48,10 @@ from transformers import (
 )
 from transformers.file_utils import get_full_repo_name
 from transformers.utils.versions import require_version
+from transformers import AutoTokenizer, AutoModel
+
+bert_path = "./bert-large-cased"
+
 from gact.controller import Controller
 import json
 from transformers.models.bert.modeling_bert import BertForSequenceClassification
@@ -288,22 +293,26 @@ def main():
             label_list.sort()  # Let's sort it for determinism
             num_labels = len(label_list)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+#     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+#     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(bert_path)
+
+    
     # Load pretrained model and tokenizer
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
     if args.customize:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+        config = AutoConfig.from_pretrained(bert_path, num_labels=num_labels, finetuning_task=args.task_name)
         config.num_hidden_layers = args.layer_num
         config.hidden_size = args.hidden_size
         # import pdb; pdb.set_trace()
         model = BertForSequenceClassification(config)        # I assume that we only use BERT.
     else:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+        config = AutoConfig.from_pretrained(bert_path, num_labels=num_labels, finetuning_task=args.task_name)
         model = AutoModelForSequenceClassification.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
+            bert_path,
+            from_tf=bool(".ckpt" in bert_path),
             config=config,
         )
     if args.ckpt:

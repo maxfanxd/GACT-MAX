@@ -27,36 +27,11 @@ def set_optimization_level(level):
     elif level == 'swap':  # vanilla swap
         config.swap = True
         config.compress_activation = False
-    elif level == 'swap-prefetch':
-        config.swap = True
-        config.compress_activation = False
-        config.prefetch = True
     elif level == 'L4bit-swap': # fix 4 bit with swap
         config.bit = 4
         config.swap = True
-        config.prefetch = False
-        config.auto_prec = False
-    elif level == 'L8bit-swap': # fix 8bit with swap
-        config.bit = 8
-        config.swap = True
-        config.prefetch = False
-        config.auto_prec = False
-    elif level == 'L4bit-swap-prefetch': # fix 4 bit with swap
-        config.bit = 4
-        config.swap = True
         config.prefetch = True
         config.auto_prec = False
-    elif level == 'L8bit-swap-prefetch': # fix 8bit with swap
-        config.bit = 8
-        config.swap = True
-        config.prefetch = True
-        config.auto_prec = False
-    elif level == 'L2bit-swap': # fix 8bit with swap
-        config.bit = 2
-        config.swap = True
-        config.prefetch = True
-        config.auto_prec = False
-
     else:
         raise ValueError("Invalid level: " + level)
 

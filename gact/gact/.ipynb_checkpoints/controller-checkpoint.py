@@ -70,6 +70,7 @@ class Controller:
     def iterate(self, get_grad):
         if not config.compress_activation:
             return
+
         self.quantizer.iterate()
         if self.auto_prec:
             self.ap.iterate_wrapper(get_grad)

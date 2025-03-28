@@ -1,10 +1,13 @@
 import wandb
 import torch
+import torchvision.models as models
+from torch.profiler import profile, record_function, ProfilerActivity
 import time
 import copy
 import argparse
 import torch.nn.functional as F
 import numpy as np
+import os
 
 from tqdm import tqdm
 
@@ -15,10 +18,21 @@ from gact.utils import get_memory_usage, exp_recorder
 
 from utils import AverageMeter
 
+# 数据集
 from cogdl.datasets.ogb import OGBArxivDataset
+from cogdl.datasets.ogb import OGBCodeDataset
+from cogdl.datasets.ogb import OGBProductsDataset
+
+from cogdl.datasets.tu_data import RedditBinary # 好像用不了
+from cogdl.datasets.matlab_matrix import FlickrDataset
+
+
 from models import GCN, SAGE, GAT
 from thop import profile
 import json
+
+from cogdl.models.nn.gcnii import GCNII
+
 
 wandb.init(project="gact-Graph")
 parser = argparse.ArgumentParser(description="GNN (gact)")
@@ -49,6 +63,12 @@ device = torch.device("cuda:0")
 
 
 dataset = OGBArxivDataset()
+# dataset = RedditBinary()
+# dataset = FlickrDataset()
+# dataset = OGBProductsDataset()
+
+print(dataset[0])
+
 graph = dataset[0]
 graph.add_remaining_self_loops()
 graph.apply(lambda x: x.to(device))
@@ -84,6 +104,14 @@ elif args.model == "gat":
         activation=args.activation,
         norm=args.norm,
         nhead=args.nhead,
+    )
+elif args.model == "gcnii":
+    model = GCNII(
+        in_feats=dataset.num_features,
+        out_feats=dataset.num_classes,
+        hidden_size=args.hidden_size,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
     )
 else:
     raise NotImplementedError
@@ -130,6 +158,7 @@ def accuracy(y_pred, y_true):
 batch_total_time = 1
 train_ips_list = []
 # install hook
+
 with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
@@ -274,3 +303,11 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         print("Peak %d MB" % (peak_mem.get_value() / 1024 / 1024))
         print("Total %d MB" % (total_mem.get_value() / 1024 / 1024))
         print("Activation %d MB" % (activation_mem.get_value() / 1024 / 1024))
+
+        try:
+            with open("new/mem/"+args.model+"/"+args.level+".txt", 'w') as f:
+                f.write('Peak %d MB\nTotal %d MB\nActivation %d MB\n' % ((peak_mem.get_value() / 1024 / 1024), (total_mem.get_value() / 1024 / 1024), (activation_mem.get_value() / 1024 / 1024)))
+        except FileNotFoundError:
+            os.makedirs(os.path.dirname("mem/"+args.model+"/"+args.level+".txt"), exist_ok=True)
+            with open("new/mem/"+args.model+"/"+args.level+".txt", 'w') as f:
+                f.write('Peak %d MB\nTotal %d MB\nActivation %d MB\n' % ((peak_mem.get_value() / 1024 / 1024), (total_mem.get_value() / 1024 / 1024), (activation_mem.get_value() / 1024 / 1024)))
