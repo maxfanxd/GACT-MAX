@@ -1,3 +1,8 @@
+# 改进流水线说明
+
+
+
+
 # GACT: Activation Compressed Training for General Architectures
 This is the official project repository for [GACT: Activation Compressed Training for General Architectures](https://arxiv.org/abs/2206.11357) by Xiaoxuan Liu, Lianmin Zheng, Dequan Wang, Yukuo Cen, Weize Chen, Xu Han, Jianfei Chen, Zhiyuan Liu, Jie Tang, Joey Gonzalez, Michael Mahoney, Alvin Cheung.
 

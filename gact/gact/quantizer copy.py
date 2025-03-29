@@ -11,31 +11,43 @@ class Quantizer:
     prefetch: if turned on, activation of the previous layer will be prefetched. the parameter is meaningful only when swap is True
     """
 
-    def __init__(self, default_bit, swap, prefetch):
-        self.unrelated_tensors = set()  # record the tensors that should not be quantized
+    def __init__(self, default_bit, swap, prefetch, prefetch_level):
+        self.unrelated_tensors = set()
         self.default_bit = default_bit
-
         self.swap = swap
+        self.prefetch_level = prefetch_level
+        self.current_tid = 0
         if swap:
             self.swap_out_stream = torch.cuda.Stream()
-            self.swap_in_stream = torch.cuda.Stream()
+            # 动态创建预取流列表
+            self.swap_in_streams = [
+                torch.cuda.Stream() 
+                for _ in range(prefetch_level)
+            ] if prefetch_level > 0 else []
+            # self.swap_in_stream_1 = torch.cuda.Stream()  # 用于预取tid-1层
+            # self.swap_in_stream_2 = torch.cuda.Stream()  # 新增流用于预取tid-2层
         self.compute_stream = torch.cuda.current_stream()
         self.ptr_qtensor_map = {}
         self.prefetch = prefetch
-        if prefetch:
-            self.start_prefetch_event = torch.cuda.Event(blocking=True)
-            self.end_prefetch_event = torch.cuda.Event(blocking=True)
+
+        # 原来的同步逻辑，会导致过度同步
+        # if prefetch:
+        #     self.start_prefetch_event = torch.cuda.Event(blocking=True)
+        #     self.end_prefetch_event = torch.cuda.Event(blocking=True)
+        if self.prefetch and self.swap:
+            self.prefetch_events = [(
+                torch.cuda.Event(blocking=True),  # start_event
+                torch.cuda.Event(blocking=True),  # end_event
+            )   for _ in range(self.prefetch_level)
+            ]
+
         self.layer_key_map = {}
         self.tid = 0
         self.start_bwd = True
-
-        # data collected for auto precision
         self.seeds = {}
         self.bits = {}
         self.dims = {}
-
-        self.iter = 0  # total number of iterations, including the extra inter for auto precision
-        # iteration for seed, share the same seed_iter for the same auto precision adaptive step
+        self.iter = 0
         self.seed_iter = 0
 
     def filter_tensors(self, pairs):
@@ -159,39 +171,40 @@ class Quantizer:
         q_inputs, ref_cnt, key_tid = self.ptr_qtensor_map[key]
 
         if self.start_bwd and self.swap:
+            # bwd开始时要等待最后一个swap出去的数据
             self.compute_stream.wait_stream(self.swap_out_stream)
             self.start_bwd = False
 
-        # compute waits until prefetch finishes
         if self.prefetch and self.swap:
-            self.end_prefetch_event.wait(self.compute_stream)
+            # 每次计算的时候要确保针对这一层的prefetch已经结束
+            self.prefetch_events[tid % self.prefetch_level][1].wait(self.compute_stream)
 
         if not q_inputs[0].is_cuda:
+            # 需要的数据不在GPU内存上，则需要进行内存交换
+            # 一般是最开始，可以理解成一个不需要的同步的流，标号为[tid % self.prefetch_level]
             q_inputs[0] = q_inputs[0].cuda(non_blocking=False)
 
-        # prefetch previous layer
         if self.prefetch and self.swap:
-            # event: start_prefetch
-            self.start_prefetch_event.record()
-            with torch.cuda.stream(self.swap_in_stream):
-                if tid > 0:
-                    self.start_prefetch_event.wait(self.swap_in_stream)
-                    previous_key = self.layer_key_map[tid - 1]
+            # 开始逐渐向前预取，参数化
+            for i in range(self.prefetch_level + 1):
+                # 假设prefetch_level = 2, 会枚举1, 2，也就是预取tid - 1, tid - 2
+                if tid - i < 0:
+                    break
+                idx = (tid - i) % self.prefetch_level
+                self.prefetch_events[idx][0].record()
+                with torch.cuda.stream(self.swap_in_streams[idx]):
+                    self.prefetch_events[idx][0].wait(self.swap_in_streams[idx])
+                    previous_key = self.layer_key_map[tid - i]
                     if previous_key in self.ptr_qtensor_map:
                         q_previous_inputs, _, _ = self.ptr_qtensor_map[previous_key]
                         if not q_previous_inputs[0].is_cuda:
-                            q_previous_inputs[0] = q_previous_inputs[0].cuda(
-                                non_blocking=True
-                            )
-                    self.end_prefetch_event.record()
+                            q_previous_inputs[0] = q_previous_inputs[0].cuda(non_blocking=True)
+                    self.prefetch_events[idx][1].record()  # 预取完成后设置end标记
 
         ret = op_dequantize(q_inputs, input_shape)
 
         ref_cnt -= 1
-        if ref_cnt < 0:
-            print("[Error] Ref count < 0", key, ref_cnt)
-            exit(-1)
-        elif ref_cnt == 0:
+        if ref_cnt == 0:
             del self.ptr_qtensor_map[key]
         else:
             self.ptr_qtensor_map[key] = [q_inputs, ref_cnt, key_tid]

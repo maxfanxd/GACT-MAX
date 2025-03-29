@@ -1,11 +1,12 @@
 import torch
 from gact.conf import config
 from gact.quantizer import Quantizer
+from gact.quantizer_original import Quantizer_Original
 from gact.autoprec import AutoPrecision
 
 
 class Controller:
-    def __init__(self, model):
+    def __init__(self, model, env, prefetch_level):
         if not config.compress_activation:
             return
 
@@ -22,8 +23,15 @@ class Controller:
             assert(config.bit <= 16)
             default_bit = 8
 
-        self.quantizer = Quantizer(
-            default_bit=default_bit, swap=config.swap, prefetch=config.prefetch)
+        if env == "new":
+            # 新测试代码
+            self.quantizer = Quantizer(
+                default_bit=default_bit, swap=config.swap, prefetch=config.prefetch, prefetch_level=prefetch_level)
+        else:
+            # 旧测试代码
+            self.quantizer = Quantizer_Original(
+                default_bit=default_bit, swap=config.swap, prefetch=config.prefetch)
+
         # does not quantize model parameters
         self.quantizer.filter_tensors(model.named_parameters())
 

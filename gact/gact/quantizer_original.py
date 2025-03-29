@@ -4,7 +4,7 @@ from gact.ops import op_quantize, op_dequantize, op_quantize_mask, op_dequantize
 from gact.utils import uniform_sample, compute_tensor_bytes
 
 
-class Quantizer:
+class Quantizer_Original:
     """
     default_bit: the number of bits used to quantize
     swap: if turned on, swap activation memory to CPU
@@ -122,10 +122,6 @@ class Quantizer:
             # quantize
             q_inputs = op_quantize(
                 input, bit, self.seeds[tid] + self.seed_iter)
-            
-            # Calculate the size of the tensor before swap
-            tensor_size_before_swap = q_inputs[0].numel() * q_inputs[0].element_size()
-
             if self.swap:
                 #  with torch.cuda.stream(self.swap_out_stream):
                 # self.swap_out_stream.wait_stream(self.compute_stream)
@@ -139,33 +135,13 @@ class Quantizer:
                 q_input_gpu = q_inputs[0]
                 del q_input_gpu
                 q_inputs[0] = q_input_cpu
-
-                # Calculate the size of the tensor after swap
-                tensor_size_after_swap = q_inputs[0].numel() * q_inputs[0].element_size()
-
-                # Log tensor sizes to a file
-                with open("/home/u210110632/jupyterlab/swap_tensor_sizes.log", "a") as log_file:
-                    log_file.write(
-                        f"Iteration: {self.iter}, Tensor ID: {tid}, "
-                        f"Size before swap: {tensor_size_before_swap} bytes, "
-                        f"Size after swap: {tensor_size_after_swap} bytes\n"
-                    )
-
             self.ptr_qtensor_map[key] = [q_inputs, 1, tid]
         else:
             # increase the ref count
             self.ptr_qtensor_map[key][1] += 1
         return True, is_dropout_mask, key, input_shape, tid
 
-    def compute_tensor_bytes(tensor):
-        """
-        计算张量占用的字节大小。
-        Args:
-            tensor (torch.Tensor): 输入的张量。
-        Returns:
-            int: 张量占用的字节大小。
-        """
-        return tensor.numel() * tensor.element_size()
+        
 
 
     def dequantize(self, input):

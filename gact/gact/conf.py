@@ -59,6 +59,13 @@ def set_optimization_level(level):
 
     else:
         raise ValueError("Invalid level: " + level)
+    
+# 设置预取流水线级数
+def set_prefetch_level(level):
+    if isinstance(level, int) and level > 0 and level < 10:
+        config.prefetch_level = level
+    else:
+        print("Invalid Prefetch Level Parameter.")
 
 def set_adapt_interval(i):
     config.adapt_interval = i
