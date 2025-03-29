@@ -6,7 +6,7 @@ from gact.ops import op_quantize, op_dequantize, op_quantize_mask, op_dequantize
 from gact.utils import uniform_sample, compute_tensor_bytes
 
 
-class Quantizer:
+class Quantizer_V1:
     """
     default_bit: the number of bits used to quantize
     swap: if turned on, swap activation memory to CPU
@@ -32,15 +32,16 @@ class Quantizer:
         self.ptr_qtensor_map = {}
         self.prefetch = prefetch
 
-        # 修改事件初始化为双缓冲环形池
+        # 原来的同步逻辑，会导致过度同步
+        # if prefetch:
+        #     self.start_prefetch_event = torch.cuda.Event(blocking=True)
+        #     self.end_prefetch_event = torch.cuda.Event(blocking=True)
         if self.prefetch and self.swap:
-            # 双缓冲大小 = 2 * prefetch_level
-            self.prefetch_events = [
-                torch.cuda.Event(enable_timing=False, blocking=False)
-                for _ in range(2 * prefetch_level)  # 双缓冲尺寸
+            self.prefetch_events = [(
+                torch.cuda.Event(blocking=True),  # start_event
+                torch.cuda.Event(blocking=True),  # end_event
+            )   for _ in range(self.prefetch_level)
             ]
-            self.event_cursor = 0  # 环形缓冲游标
-
 
         self.layer_key_map = {}
         self.tid = 0
@@ -177,50 +178,30 @@ class Quantizer:
             self.start_bwd = False
 
         if self.prefetch and self.swap:
-            # ========== 双缓冲事件等待 ==========
-            # 计算双缓冲位置
-            event_idx = self.event_cursor % (2 * self.prefetch_level)
-            current_event = self.prefetch_events[event_idx]
-            
-            # 安全等待机制
-            if not current_event.query():
-                current_event.wait(self.compute_stream)
+            # 每次计算的时候要确保针对这一层的prefetch已经结束
+            self.prefetch_events[tid % self.prefetch_level][1].wait(self.compute_stream)
 
         if not q_inputs[0].is_cuda:
+            # 需要的数据不在GPU内存上，则需要进行内存交换
+            # 一般是最开始，可以理解成一个不需要的同步的流，标号为[tid % self.prefetch_level]
             q_inputs[0] = q_inputs[0].cuda(non_blocking=False)
 
         if self.prefetch and self.swap:
-            # ========== 双缓冲预取逻辑 ==========
-            for i in range(1, self.prefetch_level + 1):
-                prefetch_tid = tid - i
-                if prefetch_tid < 0:
+            # 开始逐渐向前预取，参数化
+            for i in range(self.prefetch_level + 1):
+                # 假设prefetch_level = 2, 会枚举1, 2，也就是预取tid - 1, tid - 2
+                if tid - i < 0:
                     break
-                
-                # 计算双缓冲位置
-                buffer_idx = (self.event_cursor + i) % (2 * self.prefetch_level)
-                prefetch_stream = self.swap_in_streams[buffer_idx % self.prefetch_level]
-                
-                with torch.cuda.stream(prefetch_stream):
-                    # 双重安全机制
-                    if not self.prefetch_events[buffer_idx].query():
-                        # 先等待计算流完成可能的相关操作
-                        self.compute_stream.wait_stream(prefetch_stream)
-                        self.prefetch_events[buffer_idx].synchronize()
-                    
-                    previous_key = self.layer_key_map.get(prefetch_tid)
+                idx = (tid - i) % self.prefetch_level
+                self.prefetch_events[idx][0].record()
+                with torch.cuda.stream(self.swap_in_streams[idx]):
+                    self.prefetch_events[idx][0].wait(self.swap_in_streams[idx])
+                    previous_key = self.layer_key_map[tid - i]
                     if previous_key in self.ptr_qtensor_map:
                         q_previous_inputs, _, _ = self.ptr_qtensor_map[previous_key]
                         if not q_previous_inputs[0].is_cuda:
-                            # 异步拷贝+双缓冲记录
-                            with torch.cuda.stream(prefetch_stream):
-                                q_previous_inputs[0] = q_previous_inputs[0].cuda(non_blocking=True)
-                                # 记录到双缓冲池
-                                self.prefetch_events[buffer_idx].record()
-                                # 建立计算流依赖
-                                self.compute_stream.wait_event(self.prefetch_events[buffer_idx])
-            
-            # ========== 更新双缓冲游标 ==========
-            self.event_cursor = (self.event_cursor + 1) % (2 * self.prefetch_level)
+                            q_previous_inputs[0] = q_previous_inputs[0].cuda(non_blocking=True)
+                    self.prefetch_events[idx][1].record()  # 预取完成后设置end标记
 
         ret = op_dequantize(q_inputs, input_shape)
 
