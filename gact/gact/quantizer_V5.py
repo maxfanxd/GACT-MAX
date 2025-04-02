@@ -1,5 +1,4 @@
-### V5的另一个衍生，V6是可以传入参数，V7是不需要keep_last_n
-### 通过动态的集合来决定
+### 停止最后几个step的swap_out，修改了max_iter逻辑，V5
 
 import torch
 from gact.conf import config
@@ -7,7 +6,7 @@ from gact.ops import op_quantize, op_dequantize, op_quantize_mask, op_dequantize
 from gact.utils import uniform_sample, compute_tensor_bytes
 
 
-class Quantizer_V7:
+class Quantizer_V5:
     """
     default_bit: the number of bits used to quantize
     swap: if turned on, swap activation memory to CPU
@@ -15,8 +14,6 @@ class Quantizer_V7:
     """
 
     def __init__(self, default_bit, swap, prefetch, prefetch_level):
-        self.skipped_tids = set()  # 需要跳过的tid集合
-
         self.unrelated_tensors = set()
         self.default_bit = default_bit
         self.swap = swap
@@ -94,7 +91,7 @@ class Quantizer_V7:
         del self.unrelated_tensors
 
     def iterate(self):
-        self.max_prev_tid = max(self.max_prev_tid, self.tid)  # 记录彻底的总层数（前向+反向)
+        self.max_prev_tid = max(self.max_prev_tid, self.tid)  # 记录前向传播总层数
         del self.ptr_qtensor_map
         del self.layer_key_map
         self.ptr_qtensor_map = {}
@@ -144,9 +141,8 @@ class Quantizer_V7:
             q_inputs = op_quantize(
                 input, bit, self.seeds[tid] + self.seed_iter)
             if self.swap:
-                skip_swap = tid in self.skipped_tids
                 # 判断是否为最后keep_last_n层
-                if skip_swap:
+                if self.max_prev_tid > 0 and tid >= (self.max_prev_tid - self.keep_last_n):
                     # 最后几层不执行swap
                     pass
                 else:
@@ -196,7 +192,6 @@ class Quantizer_V7:
             # 安全等待机制
             if not current_event.query():
                 current_event.wait(self.compute_stream)
-                self.skipped_tids.add(tid)
 
         if not q_inputs[0].is_cuda:
             q_inputs[0] = q_inputs[0].cuda(non_blocking=False)

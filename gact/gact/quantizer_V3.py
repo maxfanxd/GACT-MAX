@@ -1,4 +1,4 @@
-### V1版本是最简单的，没有进行同步修饰的流水线
+### V3双缓冲
 
 import torch
 from gact.conf import config
@@ -6,7 +6,7 @@ from gact.ops import op_quantize, op_dequantize, op_quantize_mask, op_dequantize
 from gact.utils import uniform_sample, compute_tensor_bytes
 
 
-class Quantizer:
+class Quantizer_V3:
     """
     default_bit: the number of bits used to quantize
     swap: if turned on, swap activation memory to CPU

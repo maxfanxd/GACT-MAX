@@ -4,6 +4,12 @@ def set_optimization_level(level):
     elif level == 'L1':    # fixed 4-bit
         config.auto_prec = False
         config.bit = 4
+    elif level == 'L4bit':    # fixed 4-bit
+        config.auto_prec = False
+        config.bit = 4
+    elif level == 'L8bit':    # fixed 8-bit
+        config.auto_prec = False
+        config.bit = 8
     elif level == 'L1.1':    # fixed 8-bit
         config.auto_prec = False
         config.bit = 8

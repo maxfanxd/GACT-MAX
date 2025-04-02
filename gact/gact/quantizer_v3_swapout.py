@@ -1,5 +1,4 @@
-### V5的另一个衍生，V6是可以传入参数，V7是不需要keep_last_n
-### 通过动态的集合来决定
+### 新版本，对swap_out流也进行了“真正的同步”
 
 import torch
 from gact.conf import config
@@ -7,7 +6,7 @@ from gact.ops import op_quantize, op_dequantize, op_quantize_mask, op_dequantize
 from gact.utils import uniform_sample, compute_tensor_bytes
 
 
-class Quantizer_V7:
+class Quantizer:
     """
     default_bit: the number of bits used to quantize
     swap: if turned on, swap activation memory to CPU
@@ -15,8 +14,6 @@ class Quantizer_V7:
     """
 
     def __init__(self, default_bit, swap, prefetch, prefetch_level):
-        self.skipped_tids = set()  # 需要跳过的tid集合
-
         self.unrelated_tensors = set()
         self.default_bit = default_bit
         self.swap = swap
@@ -36,7 +33,7 @@ class Quantizer_V7:
         self.prefetch = prefetch
 
         # 前向和反向中间分割策略
-        self.keep_last_n = 5  # 新增控制参数
+        self.keep_last_n = 3  # 新增控制参数
         self.max_prev_tid = 0  # 记录前向传播层数
 
         # 修改事件初始化为双缓冲环形池
@@ -94,7 +91,7 @@ class Quantizer_V7:
         del self.unrelated_tensors
 
     def iterate(self):
-        self.max_prev_tid = max(self.max_prev_tid, self.tid)  # 记录彻底的总层数（前向+反向)
+        self.max_prev_tid = self.tid  # 记录前向传播总层数
         del self.ptr_qtensor_map
         del self.layer_key_map
         self.ptr_qtensor_map = {}
@@ -144,9 +141,8 @@ class Quantizer_V7:
             q_inputs = op_quantize(
                 input, bit, self.seeds[tid] + self.seed_iter)
             if self.swap:
-                skip_swap = tid in self.skipped_tids
                 # 判断是否为最后keep_last_n层
-                if skip_swap:
+                if self.max_prev_tid > 0 and tid >= (self.max_prev_tid - self.keep_last_n):
                     # 最后几层不执行swap
                     pass
                 else:
@@ -157,7 +153,9 @@ class Quantizer_V7:
                         device="cpu",
                         pin_memory=True,
                     )
-                    q_input_cpu.copy_(q_inputs[0], non_blocking=True)
+                    # 使用swap_out_stream流进行复制
+                    with torch.cuda.stream(self.swap_out_stream):
+                        q_input_cpu.copy_(q_inputs[0], non_blocking=True)
                     q_inputs[0] = q_input_cpu
             self.ptr_qtensor_map[key] = [q_inputs, 1, tid]
         else:
@@ -196,7 +194,6 @@ class Quantizer_V7:
             # 安全等待机制
             if not current_event.query():
                 current_event.wait(self.compute_stream)
-                self.skipped_tids.add(tid)
 
         if not q_inputs[0].is_cuda:
             q_inputs[0] = q_inputs[0].cuda(non_blocking=False)

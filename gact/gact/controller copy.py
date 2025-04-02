@@ -6,19 +6,13 @@ from gact.quantizer_V3 import Quantizer_V3
 from gact.quantizer_V5 import Quantizer_V5
 from gact.quantizer_V1 import Quantizer_V1
 # from gact.quantizer import Quantizer
+from gact.quantizer_cache import Quantizer_Cache
 from gact.autoprec import AutoPrecision
-from gact.quantizer_V6 import Quantizer_V6
-from gact.quantizer_V7 import Quantizer_V7
-
-
-import json
-import time
-from itertools import product
 
 
 
 class Controller:
-    def __init__(self, model, env, prefetch_level, keep_last_n=8):
+    def __init__(self, model, env, prefetch_level, keep_last_n=0):
         if not config.compress_activation:
             return
 
@@ -47,7 +41,10 @@ class Controller:
             self.quantizer = Quantizer_V5(
                 default_bit=default_bit, swap=config.swap, prefetch=config.prefetch, prefetch_level=prefetch_level)
         elif env == "new":
-            self.quantizer = Quantizer_V7(
+            self.quantizer = Quantizer(
+                default_bit=default_bit, swap=config.swap, prefetch=config.prefetch, prefetch_level=prefetch_level)
+        elif env == "cache":
+            self.quantizer = Quantizer_Cache(
                 default_bit=default_bit, swap=config.swap, prefetch=config.prefetch, prefetch_level=prefetch_level)
         else:
             print("error")

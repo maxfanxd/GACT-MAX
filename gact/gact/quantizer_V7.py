@@ -94,7 +94,7 @@ class Quantizer_V7:
         del self.unrelated_tensors
 
     def iterate(self):
-        self.max_prev_tid = max(self.max_prev_tid, self.tid)  # 记录彻底的总层数（前向+反向)
+        self.max_prev_tid = max(self.max_prev_tid, self.tid)  # 记录一个step的总层数
         del self.ptr_qtensor_map
         del self.layer_key_map
         self.ptr_qtensor_map = {}
@@ -114,6 +114,9 @@ class Quantizer_V7:
             return (tid)
 
     def quantize(self, input):
+        if self.start_bwd is False:
+            self.start_bwd = True
+
         quantize, is_dropout_mask = self.check_quantize(input)
 
         if not quantize:
@@ -183,8 +186,12 @@ class Quantizer_V7:
         q_inputs, ref_cnt, key_tid = self.ptr_qtensor_map[key]
 
         if self.start_bwd and self.swap:
-            # bwd开始时要等待最后一个swap出去的数据
-            self.compute_stream.wait_stream(self.swap_out_stream)
+            # bwd开始时要等待最后一个swap出去的数
+            if not self.swap_out_stream.query():
+                self.swap_out_stream.wait(self.compute_stream)
+                self.skipped_tids.add(tid)
+                if tid > 0:
+                    self.skipped_tids.add(tid - 1)
             self.start_bwd = False
 
         if self.prefetch and self.swap:

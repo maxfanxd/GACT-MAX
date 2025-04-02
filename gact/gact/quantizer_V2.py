@@ -1,4 +1,4 @@
-### V2版本是缓冲池的预取版本，效率比较高，但是可能有同步风险
+### V2版本是缓冲池的预取版本，效率比较高，但是可能有同步风险，单缓冲
 
 import torch
 from gact.conf import config
