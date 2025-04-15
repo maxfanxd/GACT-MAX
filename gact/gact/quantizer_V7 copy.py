@@ -44,10 +44,9 @@ class Quantizer_V7:
             # 双缓冲大小 = 2 * prefetch_level
             self.prefetch_events = [
                 torch.cuda.Event(enable_timing=False, blocking=False)
-                for _ in range(prefetch_level)  # 双缓冲尺寸
+                for _ in range(2 * prefetch_level)  # 双缓冲尺寸
             ]
             self.event_cursor = 0  # 环形缓冲游标
-
 
 
         self.layer_key_map = {}
@@ -95,7 +94,7 @@ class Quantizer_V7:
         del self.unrelated_tensors
 
     def iterate(self):
-        # self.max_prev_tid = max(self.max_prev_tid, self.tid)  # 记录一个step的总层数
+        self.max_prev_tid = max(self.max_prev_tid, self.tid)  # 记录一个step的总层数
         del self.ptr_qtensor_map
         del self.layer_key_map
         self.ptr_qtensor_map = {}
@@ -148,21 +147,21 @@ class Quantizer_V7:
             q_inputs = op_quantize(
                 input, bit, self.seeds[tid] + self.seed_iter)
             if self.swap:
-                # skip_swap = tid in self.skipped_tids
-                # # 判断是否为最后keep_last_n层
-                # if skip_swap:
-                #     # 最后几层不执行swap
-                #     pass
-                # else:
-                # 执行swap逻辑
-                q_input_cpu = torch.empty(
-                    q_inputs[0].shape,
-                    dtype=q_inputs[0].dtype,
-                    device="cpu",
-                    pin_memory=True,
-                )
-                q_input_cpu.copy_(q_inputs[0], non_blocking=True)
-                q_inputs[0] = q_input_cpu
+                skip_swap = tid in self.skipped_tids
+                # 判断是否为最后keep_last_n层
+                if skip_swap:
+                    # 最后几层不执行swap
+                    pass
+                else:
+                    # 执行swap逻辑
+                    q_input_cpu = torch.empty(
+                        q_inputs[0].shape,
+                        dtype=q_inputs[0].dtype,
+                        device="cpu",
+                        pin_memory=True,
+                    )
+                    q_input_cpu.copy_(q_inputs[0], non_blocking=True)
+                    q_inputs[0] = q_input_cpu
             self.ptr_qtensor_map[key] = [q_inputs, 1, tid]
         else:
             # increase the ref count
@@ -190,21 +189,21 @@ class Quantizer_V7:
             # bwd开始时要等待最后一个swap出去的数
             if not self.swap_out_stream.query():
                 self.swap_out_stream.wait(self.compute_stream)
-                # self.skipped_tids.add(tid)
-                # if tid > 0:
-                #     self.skipped_tids.add(tid - 1)
+                self.skipped_tids.add(tid)
+                if tid > 0:
+                    self.skipped_tids.add(tid - 1)
             self.start_bwd = False
 
         if self.prefetch and self.swap:
             # ========== 双缓冲事件等待 ==========
             # 计算双缓冲位置
-            event_idx = self.event_cursor % (self.prefetch_level)
+            event_idx = self.event_cursor % (2 * self.prefetch_level)
             current_event = self.prefetch_events[event_idx]
             
             # 安全等待机制
             if not current_event.query():
                 current_event.wait(self.compute_stream)
-                # self.skipped_tids.add(tid)
+                self.skipped_tids.add(tid)
 
         if not q_inputs[0].is_cuda:
             q_inputs[0] = q_inputs[0].cuda(non_blocking=False)
@@ -214,10 +213,10 @@ class Quantizer_V7:
             for i in range(1, self.prefetch_level + 1):
                 prefetch_tid = tid - i
                 if prefetch_tid < 0:
-                    break   
+                    break
                 
                 # 计算双缓冲位置
-                buffer_idx = (self.event_cursor + i) % (self.prefetch_level)
+                buffer_idx = (self.event_cursor + i) % (2 * self.prefetch_level)
                 prefetch_stream = self.swap_in_streams[buffer_idx % self.prefetch_level]
                 
                 with torch.cuda.stream(prefetch_stream):
@@ -240,7 +239,7 @@ class Quantizer_V7:
                                 self.compute_stream.wait_event(self.prefetch_events[buffer_idx])
             
             # ========== 更新双缓冲游标 ==========
-            self.event_cursor = (self.event_cursor + 1) % (self.prefetch_level)
+            self.event_cursor = (self.event_cursor + 1) % (2 * self.prefetch_level)
 
         ret = op_dequantize(q_inputs, input_shape)
 
